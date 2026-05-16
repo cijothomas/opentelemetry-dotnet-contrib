@@ -43,10 +43,10 @@ app.MapPatch("/items/{id:int}", (int id) => Results.Ok(new { id, patched = true 
 app.MapDelete("/items/{id:int}", (int id) => Results.NoContent());
 
 // HEAD via MapMethods (no body returned).
-app.MapMethods("/items/{id:int}", new[] { "HEAD" }, (int id) => Results.Ok());
+app.MapMethods("/items/{id:int}", HttpMethodLists.HttpHead, (int id) => Results.Ok());
 
 // OPTIONS via MapMethods.
-app.MapMethods("/items", new[] { "OPTIONS" }, () => Results.Ok());
+app.MapMethods("/items", HttpMethodLists.HttpOptions, () => Results.Ok());
 
 // Catch-all wildcard route.
 app.MapGet("/files/{*path}", (string path) => Results.Ok(new { path }));
@@ -65,3 +65,9 @@ app.MapGet("/error", () => Results.Problem("intentional", statusCode: 500));
 app.MapGet("/throw", () => { throw new InvalidOperationException("test"); });
 
 app.Run();
+
+internal static class HttpMethodLists
+{
+    public static readonly string[] HttpHead = { "HEAD" };
+    public static readonly string[] HttpOptions = { "OPTIONS" };
+}
