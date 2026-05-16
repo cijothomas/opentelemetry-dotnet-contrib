@@ -1,0 +1,123 @@
+name: Weaver Live Check (AspNetCore)
+
+# Validates that telemetry emitted by the OpenTelemetry.Instrumentation.AspNetCore
+# package complies with the published OpenTelemetry semantic conventions.
+#
+# Uses the reusable `weaver-live-check-{start,finalize}` composite actions.
+# The workflow itself only contains the project-specific glue: build the
+# example app, drive HTTP traffic, stop it.
+
+env:
+  WEAVER_VERSION: v0.23.0
+  # Pinned semantic-conventions release for reproducible runs. Bump
+  # deliberately when conventions change.
+  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.41.1.tar.gz[model]'
+  APP_PORT: '5000'
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/OpenTelemetry.Instrumentation.AspNetCore/**'
+      - 'examples/aspnetcore/**'
+      - '.github/workflows/weaver-live-check-aspnetcore.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/OpenTelemetry.Instrumentation.AspNetCore/**'
+      - 'examples/aspnetcore/**'
+      - '.github/workflows/weaver-live-check-aspnetcore.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      # ---- Reusable actions sourced from a personal fork while the
+      #      upstream PR is in review. Switch to
+      #      `open-telemetry/weaver/...@<tag>` once the actions land.
+      - name: Setup weaver
+        uses: cijothomas/weaver/.github/actions/setup-weaver@cijothomas/weaver-live-check-actions
+        with:
+          version: ${{ env.WEAVER_VERSION }}
+
+      - name: Start weaver live-check
+        id: live-check
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-start@cijothomas/weaver-live-check-actions
+        with:
+          registry: ${{ env.SEMCONV_REGISTRY }}
+
+      # ---- Project-specific: build the example, run it, drive traffic
+      - name: Build aspnetcore example
+        working-directory: examples/aspnetcore
+        run: dotnet build -c Release --nologo
+
+      - name: Run example + drive traffic
+        working-directory: examples/aspnetcore
+        env:
+          ASPNETCORE_URLS: http://localhost:${{ env.APP_PORT }}
+          OTEL_SERVICE_NAME: aspnetcore-example
+          OTEL_METRIC_EXPORT_INTERVAL: '2000'
+          OTEL_BSP_SCHEDULE_DELAY: '1000'
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.live-check.outputs.otlp-grpc-endpoint }}
+          OTEL_EXPORTER_OTLP_PROTOCOL: 'grpc'
+        run: |
+          set -euo pipefail
+
+          echo "::group::Start example service"
+          dotnet run -c Release --no-build --project aspnetcore-example.csproj \
+            > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
+          APP_PID=$!
+          echo "app pid: $APP_PID"
+          echo "::endgroup::"
+
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          echo "::group::Drive traffic"
+          for i in $(seq 1 25); do
+            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/" || true
+            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/users/$i" || true
+            curl -fsS -o /dev/null -X POST "http://127.0.0.1:${APP_PORT}/items" || true
+            curl -fsS -o /dev/null -X PUT  "http://127.0.0.1:${APP_PORT}/items/$i" || true
+            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/error" || true
+          done
+          echo "::endgroup::"
+
+          # Allow batch span / periodic metric exporters to flush.
+          sleep 6
+
+          kill "$APP_PID" 2>/dev/null || true
+
+      - name: Finalize weaver live-check
+        if: always()
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-finalize@cijothomas/weaver-live-check-actions
+        with:
+          fail-on: violation
+
+      - name: Upload live-check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weaver-live-check-aspnetcore
+          path: ${{ steps.live-check.outputs.state-dir }}
+          if-no-files-found: warn
