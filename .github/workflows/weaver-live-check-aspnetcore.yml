@@ -94,12 +94,30 @@ jobs:
           done
 
           echo "::group::Drive traffic"
-          for i in $(seq 1 25); do
+          # Exercise the full HTTP method × status-code matrix so weaver
+          # validates as many attribute combinations as possible.
+          for i in $(seq 1 15); do
+            # 200 OK on root + templated routes
             curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/" || true
             curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/users/$i" || true
-            curl -fsS -o /dev/null -X POST "http://127.0.0.1:${APP_PORT}/items" || true
-            curl -fsS -o /dev/null -X PUT  "http://127.0.0.1:${APP_PORT}/items/$i" || true
-            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/error" || true
+            # 201 Created (POST), 200 OK on PUT/PATCH, 204 No Content (DELETE)
+            curl -fsS -o /dev/null -X POST   "http://127.0.0.1:${APP_PORT}/items" || true
+            curl -fsS -o /dev/null -X PUT    "http://127.0.0.1:${APP_PORT}/items/$i" || true
+            curl -fsS -o /dev/null -X PATCH  "http://127.0.0.1:${APP_PORT}/items/$i" || true
+            curl -fsS -o /dev/null -X DELETE "http://127.0.0.1:${APP_PORT}/items/$i" || true
+            # HEAD and OPTIONS to round out the method matrix.
+            curl -fsS -o /dev/null -X HEAD    "http://127.0.0.1:${APP_PORT}/items/$i" || true
+            curl -fsS -o /dev/null -X OPTIONS "http://127.0.0.1:${APP_PORT}/items" || true
+            # Wildcard catch-all route.
+            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/files/a/b/c/$i.txt" || true
+            # 4xx status codes.
+            curl -sS  -o /dev/null "http://127.0.0.1:${APP_PORT}/bad-request"   || true  # 400
+            curl -sS  -o /dev/null "http://127.0.0.1:${APP_PORT}/unauthorized"  || true  # 401
+            curl -sS  -o /dev/null "http://127.0.0.1:${APP_PORT}/no-such-route" || true  # 404
+            # 5xx via Results.Problem (handled).
+            curl -sS  -o /dev/null "http://127.0.0.1:${APP_PORT}/error"         || true
+            # Unhandled exception path → exercises error.type attribute.
+            curl -sS  -o /dev/null "http://127.0.0.1:${APP_PORT}/throw"         || true
           done
           echo "::endgroup::"
 
