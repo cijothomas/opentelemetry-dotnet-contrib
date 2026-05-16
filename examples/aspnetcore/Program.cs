@@ -65,9 +65,3 @@ app.MapGet("/error", () => Results.Problem("intentional", statusCode: 500));
 app.MapGet("/throw", () => { throw new InvalidOperationException("test"); });
 
 app.Run();
-
-internal static class HttpMethodLists
-{
-    public static readonly string[] HttpHead = { "HEAD" };
-    public static readonly string[] HttpOptions = { "OPTIONS" };
-}
