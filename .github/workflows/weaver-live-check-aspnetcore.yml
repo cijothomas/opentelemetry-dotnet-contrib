@@ -137,7 +137,7 @@ jobs:
 
       - name: Finalize weaver live-check
         if: always()
-        uses: cijothomas/weaver/.github/actions/weaver-live-check-finalize@cijothomas/weaver-live-check-actions
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-stop@cijothomas/weaver-live-check-actions
         with:
           fail-on: violation
 
@@ -148,3 +148,4 @@ jobs:
           name: weaver-live-check-aspnetcore
           path: ${{ steps.live-check.outputs.state-dir }}
           if-no-files-found: warn
+
